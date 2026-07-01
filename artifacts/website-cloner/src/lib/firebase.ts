@@ -1,6 +1,9 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
-  getFirestore, 
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  getFirestore,
   collection, 
   doc, 
   setDoc, 
@@ -17,7 +20,23 @@ import firebaseConfig from './firebase-config.json';
 
 // Initialize Firebase
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-export const db = getFirestore(app);
+
+// Configure Firestore with auto-detect long-polling and multi-tab persistent cache
+// This prevents the 10-second WebSocket timeout when Firestore is run inside sandboxed iframes or custom preview environments.
+let firestoreDb;
+try {
+  firestoreDb = initializeFirestore(app, {
+    experimentalAutoDetectLongPolling: true,
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager(),
+    }),
+  });
+} catch (error) {
+  console.warn('initializeFirestore with advanced settings failed, falling back to getFirestore:', error);
+  firestoreDb = getFirestore(app);
+}
+
+export const db = firestoreDb;
 
 // Collection References
 export const CHATS_COLL = 'chats';
