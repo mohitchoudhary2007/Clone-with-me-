@@ -34,9 +34,9 @@ app.use("/api", router);
 
 // Serve frontend
 import fs from "fs";
-let distPath = path.resolve(__dirname, "../../website-cloner/dist/public");
+let distPath = path.resolve(__dirname, "../../website-cloner/dist");
 if (!fs.existsSync(distPath)) {
-  distPath = path.resolve(process.cwd(), "artifacts/website-cloner/dist/public");
+  distPath = path.resolve(process.cwd(), "artifacts/website-cloner/dist");
 }
 logger.info({ distPath, exists: fs.existsSync(distPath) }, "Serving static files from");
 
