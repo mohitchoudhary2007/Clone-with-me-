@@ -1,0 +1,13 @@
+# Configuration for Netlify deployment if Base directory is set to artifacts/website-cloner
+
+[build]
+  # Build command
+  command = "npm run build"
+
+  # Publish directory relative to base path
+  publish = "dist"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

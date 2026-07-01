@@ -1,0 +1,16 @@
+# Configuration for Netlify deployment from the monorepo root
+
+[build]
+  # Base directory: points to the website cloner subfolder
+  base = "artifacts/website-cloner"
+
+  # Build command: runs inside the base directory
+  command = "npm run build"
+
+  # Publish directory: relative to the base directory (artifacts/website-cloner/dist)
+  publish = "dist"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

@@ -1,5 +1,5 @@
 {
-  "name": "TinyFish Clone Generator",
+  "name": "Clone with me",
   "description": "Generate high-quality prompts to clone and replicate web designs easily.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
