@@ -28,11 +28,15 @@ import {
   ShieldAlert,
   Send,
   User,
-  Bot
+  Bot,
+  Users,
+  BarChart2,
+  Compass,
+  Laptop
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ChatMessage } from '@/components/ChatWidget';
-import { db, CHATS_COLL, ADMIN_AUTH_COLL } from '@/lib/firebase';
+import { db, CHATS_COLL, ADMIN_AUTH_COLL, VISITORS_COLL } from '@/lib/firebase';
 import { collection, onSnapshot, query, where, orderBy, doc, getDoc, addDoc, getDocs, deleteDoc } from 'firebase/firestore';
 import { encryptMessage, decryptMessage } from '@/lib/crypto';
 
@@ -47,10 +51,11 @@ export default function Admin() {
   const [isSubmittingLogin, setIsSubmittingLogin] = useState(false);
 
   // Admin view states
-  const [activeTab, setActiveTab] = useState<'activity' | 'protocols' | 'showcase' | 'maintenance' | 'support'>('activity');
+  const [activeTab, setActiveTab] = useState<'activity' | 'protocols' | 'showcase' | 'maintenance' | 'support' | 'visitors'>('activity');
   const [clones, setClones] = useState<any[]>([]);
   const [showClearLogsConfirm, setShowClearLogsConfirm] = useState(false);
   const [showClearChatsConfirm, setShowClearChatsConfirm] = useState(false);
+  const [showClearVisitorsConfirm, setShowClearVisitorsConfirm] = useState(false);
   
   // App Control States (saved in localStorage to control the main app)
   const [strictProtocols, setStrictProtocols] = useState(true);
@@ -104,6 +109,30 @@ export default function Admin() {
       }, 50);
     }
   }, [allChats, activeSessionId]);
+
+  // Real-time visitor snapshot listener
+  const [visitors, setVisitors] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    try {
+      const q = query(collection(db, VISITORS_COLL));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const list = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        // Sort by last active or first visit (most recent first)
+        list.sort((a: any, b: any) => (b.lastActive || 0) - (a.lastActive || 0));
+        setVisitors(list);
+      }, (err) => {
+        console.error('Failed to listen to visitors:', err);
+      });
+      return () => unsubscribe();
+    } catch (e) {
+      console.error('Error setting up visitors listener:', e);
+    }
+  }, [isLoggedIn]);
 
   // Check login state on mount
   useEffect(() => {
@@ -308,10 +337,62 @@ export default function Admin() {
     }
   };
 
+  const clearAllVisitors = async () => {
+    try {
+      const querySnapshot = await getDocs(collection(db, VISITORS_COLL));
+      const deletePromises = querySnapshot.docs.map((doc) => deleteDoc(doc.ref));
+      await Promise.all(deletePromises);
+
+      setVisitors([]);
+      setShowClearVisitorsConfirm(false);
+      toast.success('Visitor traffic logs deleted from Firebase successfully.');
+    } catch (err) {
+      console.error('Failed to clear visitor logs:', err);
+      toast.error('Error connecting to Firebase.');
+    }
+  };
+
+  const deleteSingleVisitor = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, VISITORS_COLL, id));
+      setVisitors(prev => prev.filter(v => v.id !== id));
+      toast.success('Visitor session deleted successfully.');
+    } catch (err) {
+      console.error('Failed to delete visitor:', err);
+      toast.error('Error connecting to Firebase.');
+    }
+  };
+
   // Calculate statistics
   const totalClones = clones.length;
   const successfulClones = clones.filter(c => c.status === 'success').length;
   const successRate = totalClones > 0 ? Math.round((successfulClones / totalClones) * 100) : 100;
+
+  // Calculate visitor statistics
+  const totalUniqueVisitors = visitors.length;
+  const totalPageViews = visitors.reduce((sum, v) => sum + (v.views || 0), 0);
+  const nowTime = Date.now();
+  const activeNowCount = visitors.filter(v => (nowTime - (v.lastActive || 0)) < 300000).length; // active in last 5 minutes
+  const avgViewsPerSession = totalUniqueVisitors > 0 ? (totalPageViews / totalUniqueVisitors).toFixed(1) : '0.0';
+
+  // Device metrics
+  const browserStats = visitors.reduce((acc, v) => {
+    const b = v.browser || 'Unknown';
+    acc[b] = (acc[b] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const osStats = visitors.reduce((acc, v) => {
+    const o = v.os || 'Unknown';
+    acc[o] = (acc[o] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const referrerStats = visitors.reduce((acc, v) => {
+    const r = v.referrer || 'Direct';
+    acc[r] = (acc[r] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground font-mono relative overflow-hidden">
@@ -603,6 +684,16 @@ export default function Admin() {
                   }`}
                 >
                   <MessageSquare className="w-4 h-4" /> Support Chat ({Array.from(new Set(allChats.map(c => c.sessionId))).length})
+                </button>
+                <button
+                  onClick={() => setActiveTab('visitors')}
+                  className={`flex items-center gap-2 px-5 py-3 text-xs uppercase font-bold tracking-wider border-b-2 transition-all ${
+                    activeTab === 'visitors'
+                      ? 'border-primary text-primary bg-primary/5'
+                      : 'border-transparent text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Users className="w-4 h-4" /> Visitor Traffic ({visitors.length})
                 </button>
               </div>
 
@@ -1072,6 +1163,252 @@ export default function Admin() {
 
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* ── Tab 6: VISITOR ANALYTICS & TRAFFIC ── */}
+                {activeTab === 'visitors' && (
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <h3 className="text-base font-bold text-foreground">Visitor Traffic & Analytics</h3>
+                        <p className="text-xs text-muted-foreground">Monitor unique visits, total page views, and user agents in real time</p>
+                      </div>
+                      {showClearVisitorsConfirm ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-amber-400">Confirm delete?</span>
+                          <button
+                            type="button"
+                            onClick={clearAllVisitors}
+                            className="text-xs text-red-400 hover:text-red-300 font-bold bg-red-950/30 border border-red-900/50 px-2 py-1 rounded cursor-pointer"
+                          >
+                            Yes, Clear All
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowClearVisitorsConfirm(false)}
+                            className="text-xs text-muted-foreground hover:text-foreground font-bold bg-white/5 border border-white/10 px-2 py-1 rounded cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setShowClearVisitorsConfirm(true)}
+                          disabled={visitors.length === 0}
+                          className="inline-flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 transition-colors uppercase font-bold disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Clear All Visitors
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Stats Overview Grid */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {/* Stat 1 */}
+                      <div className="p-4 bg-[#0a0a0c] border border-white/5 rounded-xl flex flex-col justify-between">
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Total Views</span>
+                        <div className="mt-2 flex items-baseline gap-1">
+                          <span className="text-2xl font-extrabold text-foreground font-mono">{totalPageViews}</span>
+                        </div>
+                        <span className="text-[9px] text-muted-foreground/60 mt-1">Accumulated hits</span>
+                      </div>
+
+                      {/* Stat 2 */}
+                      <div className="p-4 bg-[#0a0a0c] border border-white/5 rounded-xl flex flex-col justify-between">
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Unique Visitors</span>
+                        <div className="mt-2 flex items-baseline gap-1">
+                          <span className="text-2xl font-extrabold text-primary font-mono">{totalUniqueVisitors}</span>
+                        </div>
+                        <span className="text-[9px] text-muted-foreground/60 mt-1">Unique session IDs</span>
+                      </div>
+
+                      {/* Stat 3 */}
+                      <div className="p-4 bg-[#0a0a0c] border border-white/5 rounded-xl flex flex-col justify-between">
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Active Now</span>
+                        <div className="mt-2 flex items-baseline gap-2">
+                          <span className="text-2xl font-extrabold text-emerald-400 font-mono">{activeNowCount}</span>
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping self-center" />
+                        </div>
+                        <span className="text-[9px] text-muted-foreground/60 mt-1">Hits in last 5m</span>
+                      </div>
+
+                      {/* Stat 4 */}
+                      <div className="p-4 bg-[#0a0a0c] border border-white/5 rounded-xl flex flex-col justify-between">
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Avg views / Session</span>
+                        <div className="mt-2 flex items-baseline gap-1">
+                          <span className="text-2xl font-extrabold text-indigo-400 font-mono">{avgViewsPerSession}</span>
+                        </div>
+                        <span className="text-[9px] text-muted-foreground/60 mt-1">Engagement score</span>
+                      </div>
+                    </div>
+
+                    {/* Breakdown Graphs & Tables Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {/* Browsers */}
+                      <div className="p-4 bg-[#0a0a0c] border border-white/5 rounded-xl">
+                        <h4 className="text-xs uppercase font-bold tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5 font-mono">
+                          <Laptop className="w-3.5 h-3.5" /> Browser Share
+                        </h4>
+                        <div className="space-y-2">
+                          {Object.keys(browserStats).length === 0 ? (
+                            <p className="text-[10px] text-muted-foreground">No data available</p>
+                          ) : (
+                            Object.entries(browserStats).map(([browser, count]) => {
+                              const pct = Math.round((count / totalUniqueVisitors) * 100);
+                              return (
+                                <div key={browser} className="space-y-1">
+                                  <div className="flex items-center justify-between text-[10px]">
+                                    <span className="text-foreground font-bold">{browser}</span>
+                                    <span className="text-muted-foreground">{count} ({pct}%)</span>
+                                  </div>
+                                  <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                    <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+
+                      {/* OS */}
+                      <div className="p-4 bg-[#0a0a0c] border border-white/5 rounded-xl">
+                        <h4 className="text-xs uppercase font-bold tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5 font-mono">
+                          <Activity className="w-3.5 h-3.5" /> Operating Systems
+                        </h4>
+                        <div className="space-y-2">
+                          {Object.keys(osStats).length === 0 ? (
+                            <p className="text-[10px] text-muted-foreground">No data available</p>
+                          ) : (
+                            Object.entries(osStats).map(([os, count]) => {
+                              const pct = Math.round((count / totalUniqueVisitors) * 100);
+                              return (
+                                <div key={os} className="space-y-1">
+                                  <div className="flex items-center justify-between text-[10px]">
+                                    <span className="text-foreground font-bold">{os}</span>
+                                    <span className="text-muted-foreground">{count} ({pct}%)</span>
+                                  </div>
+                                  <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                    <div className="h-full bg-indigo-500" style={{ width: `${pct}%` }} />
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Referrers */}
+                      <div className="p-4 bg-[#0a0a0c] border border-white/5 rounded-xl">
+                        <h4 className="text-xs uppercase font-bold tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5 font-mono">
+                          <Compass className="w-3.5 h-3.5" /> Acquisition / Referrers
+                        </h4>
+                        <div className="space-y-2">
+                          {Object.keys(referrerStats).length === 0 ? (
+                            <p className="text-[10px] text-muted-foreground">No data available</p>
+                          ) : (
+                            Object.entries(referrerStats).map(([referrer, count]) => {
+                              const pct = Math.round((count / totalUniqueVisitors) * 100);
+                              return (
+                                <div key={referrer} className="space-y-1">
+                                  <div className="flex items-center justify-between text-[10px]">
+                                    <span className="text-foreground font-bold truncate max-w-[120px]" title={referrer}>
+                                      {referrer === 'Direct' ? 'Direct / Bookmark' : referrer.replace(/https?:\/\//i, '')}
+                                    </span>
+                                    <span className="text-muted-foreground">{count}</span>
+                                  </div>
+                                  <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                    <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Detailed Visitor Traffic Table */}
+                    <div className="bg-[#0a0a0c] border border-white/5 rounded-xl overflow-hidden">
+                      <div className="px-4 py-3 bg-white/5 border-b border-white/5 flex items-center justify-between">
+                        <h4 className="text-xs uppercase font-bold tracking-wider text-foreground font-mono">Detailed Traffic Log</h4>
+                        <span className="text-[10px] text-muted-foreground font-mono">Showing {visitors.length} session entries</span>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        {visitors.length === 0 ? (
+                          <div className="p-8 text-center text-xs text-muted-foreground font-mono">
+                            No visitor records found in Firestore. Seeding happens automatically on user visit.
+                          </div>
+                        ) : (
+                          <table className="w-full text-left border-collapse">
+                            <thead>
+                              <tr className="border-b border-white/5 text-[9px] uppercase text-muted-foreground tracking-wider bg-black/10">
+                                <th className="px-4 py-2.5">Session ID</th>
+                                <th className="px-4 py-2.5">Platform</th>
+                                <th className="px-4 py-2.5">Referrer</th>
+                                <th className="px-4 py-2.5">Views</th>
+                                <th className="px-4 py-2.5">First Active</th>
+                                <th className="px-4 py-2.5">Last Active</th>
+                                <th className="px-4 py-2.5 text-right">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-white/5 text-[11px]">
+                              {visitors.map((visitor) => {
+                                const isActive = (nowTime - (visitor.lastActive || 0)) < 300000;
+                                return (
+                                  <tr key={visitor.id} className="hover:bg-white/5 transition-colors">
+                                    <td className="px-4 py-3 font-mono text-xs text-primary max-w-[120px] truncate" title={visitor.sessionId}>
+                                      {visitor.sessionId || 'anonymous'}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                      <div className="flex flex-col gap-0.5">
+                                        <span className="font-bold text-foreground">{visitor.os || 'Unknown OS'}</span>
+                                        <span className="text-[9px] text-muted-foreground">{visitor.browser || 'Unknown Browser'} • {visitor.language || 'en'}</span>
+                                      </div>
+                                    </td>
+                                    <td className="px-4 py-3 text-muted-foreground truncate max-w-[140px]" title={visitor.referrer}>
+                                      {visitor.referrer === 'Direct' ? 'Direct / Bookmark' : visitor.referrer}
+                                    </td>
+                                    <td className="px-4 py-3 font-bold font-mono text-foreground">
+                                      {visitor.views || 1}
+                                    </td>
+                                    <td className="px-4 py-3 text-[10px] text-muted-foreground/80">
+                                      {visitor.firstVisit ? new Date(visitor.firstVisit).toLocaleString() : 'N/A'}
+                                    </td>
+                                    <td className="px-4 py-3 text-[10px]">
+                                      <div className="flex items-center gap-1.5">
+                                        {isActive ? (
+                                          <span className="text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider animate-pulse flex items-center gap-1 font-mono">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Active Now
+                                          </span>
+                                        ) : (
+                                          <span className="text-muted-foreground">
+                                            {visitor.lastActive ? new Date(visitor.lastActive).toLocaleString() : 'N/A'}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td className="px-4 py-3 text-right">
+                                      <button
+                                        type="button"
+                                        onClick={() => deleteSingleVisitor(visitor.id)}
+                                        className="p-1.5 text-muted-foreground hover:text-red-400 rounded-lg hover:bg-red-950/20 transition-all cursor-pointer"
+                                        title="Delete Session"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )}
 

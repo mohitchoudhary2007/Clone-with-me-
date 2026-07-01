@@ -7,6 +7,7 @@ import { Loader2, Copy, Download, Terminal, Search, Check, Globe, Sparkles, Mess
 import { Link, useLocation } from 'wouter';
 import { toast } from 'sonner';
 import ChatWidget from '@/components/ChatWidget';
+import { logVisit } from '@/lib/firebase';
 
 // Popular sites for live background preview cards
 const SHOWCASE_SITES = [
@@ -113,6 +114,9 @@ export default function Home() {
   };
 
   useEffect(() => {
+    // Log visitor session and page view to Firestore
+    logVisit();
+    
     try {
       const cfgCards = localStorage.getItem('tinyfish_cfg_cards');
       if (cfgCards !== null) setShowLiveCards(cfgCards === 'true');

@@ -52,6 +52,7 @@ export const CHATS_COLL = 'chats';
 export const ADMIN_AUTH_COLL = 'admin_auth';
 export const CLONES_COLL = 'clones';
 export const APP_CONFIG_COLL = 'app_config';
+export const VISITORS_COLL = 'visitors';
 
 /**
  * Seeds the default Admin credentials in Firebase Firestore if not already present.
@@ -116,4 +117,64 @@ export async function seedAppConfigIfNeeded() {
 }
 
 // Seeding functions are exported so they can be triggered lazily inside React component mount cycles.
+
+/**
+ * Logs a new visitor session or page view in Firestore
+ */
+export async function logVisit() {
+  if (typeof window === 'undefined') return;
+  try {
+    const sessionKey = 'tinyfish_visitor_session_id';
+    let sessionId = sessionStorage.getItem(sessionKey);
+    
+    if (!sessionId) {
+      sessionId = 'v_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now().toString(36);
+      sessionStorage.setItem(sessionKey, sessionId);
+    }
+    
+    const visitDocRef = doc(db, VISITORS_COLL, sessionId);
+    const docSnap = await getDoc(visitDocRef);
+    
+    const timestamp = Date.now();
+    const userAgent = navigator.userAgent;
+    const referrer = document.referrer || 'Direct';
+    const language = navigator.language || 'en';
+    
+    // Detect basic device/browser info
+    let browser = 'Unknown';
+    if (userAgent.indexOf('Firefox') > -1) browser = 'Firefox';
+    else if (userAgent.indexOf('Chrome') > -1) browser = 'Chrome';
+    else if (userAgent.indexOf('Safari') > -1 && userAgent.indexOf('Chrome') === -1) browser = 'Safari';
+    else if (userAgent.indexOf('Edge') > -1) browser = 'Edge';
+    else if (userAgent.indexOf('Chrome') > -1) browser = 'Chrome';
+    
+    let os = 'Unknown';
+    if (userAgent.indexOf('Windows') > -1) os = 'Windows';
+    else if (userAgent.indexOf('Macintosh') > -1) os = 'macOS';
+    else if (userAgent.indexOf('Linux') > -1) os = 'Linux';
+    else if (userAgent.indexOf('Android') > -1) os = 'Android';
+    else if (userAgent.indexOf('iPhone') > -1 || userAgent.indexOf('iPad') > -1) os = 'iOS';
+
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      await setDoc(visitDocRef, {
+        views: (data.views || 1) + 1,
+        lastActive: timestamp
+      }, { merge: true });
+    } else {
+      await setDoc(visitDocRef, {
+        sessionId,
+        browser,
+        os,
+        referrer,
+        language,
+        firstVisit: timestamp,
+        lastActive: timestamp,
+        views: 1
+      });
+    }
+  } catch (error) {
+    console.warn('Failed to log visitor session:', error);
+  }
+}
 
