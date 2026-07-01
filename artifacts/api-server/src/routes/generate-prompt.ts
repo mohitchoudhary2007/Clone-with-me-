@@ -131,35 +131,43 @@ async function fetchPlain(url: URL): Promise<{ html: string; title: string; desc
   };
 
   try {
-    // Use redirect:'manual' to validate every hop against SSRF rules
-    const response = await fetch(url.toString(), {
-      signal: controller.signal,
-      redirect: "manual",
-      headers: BROWSER_HEADERS,
-    });
+    let currentUrl = url;
+    let response: Response | null = null;
+    let hops = 0;
+    const maxHops = 5;
 
-    // Follow one redirect hop with full SSRF validation
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get("location");
-      if (!location) throw new Error("Redirect with no Location header");
-
-      let destUrl: URL;
-      try { destUrl = new URL(location, url.toString()); }
-      catch { throw new Error("Invalid redirect destination"); }
-
-      if (!["http:", "https:"].includes(destUrl.protocol)) {
-        throw new Error("Redirect to non-HTTP protocol blocked");
-      }
-      const safe = await isSafeUrl(destUrl);
-      if (!safe) throw new Error("Redirect to private/internal address blocked (SSRF)");
-
-      const r2 = await fetch(destUrl.toString(), {
+    while (hops < maxHops) {
+      response = await fetch(currentUrl.toString(), {
         signal: controller.signal,
         redirect: "manual",
         headers: BROWSER_HEADERS,
       });
-      clearTimeout(timeout);
-      return readHtmlResponse(r2);
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        if (!location) throw new Error("Redirect with no Location header");
+
+        try {
+          currentUrl = new URL(location, currentUrl.toString());
+        } catch {
+          throw new Error("Invalid redirect destination");
+        }
+
+        if (!["http:", "https:"].includes(currentUrl.protocol)) {
+          throw new Error("Redirect to non-HTTP protocol blocked");
+        }
+
+        const safe = await isSafeUrl(currentUrl);
+        if (!safe) throw new Error("Redirect to private/internal address blocked (SSRF)");
+
+        hops++;
+      } else {
+        break;
+      }
+    }
+
+    if (!response) {
+      throw new Error("No response received");
     }
 
     clearTimeout(timeout);

@@ -8,21 +8,6 @@ import Admin from '@/pages/Admin';
 import NotFound from '@/pages/not-found';
 import { seedAdminAuthIfNeeded, seedAppConfigIfNeeded } from '@/lib/firebase';
 
-// Configure Base URL dynamically when running on external hosting like Netlify
-try {
-  const hostname = window.location.hostname;
-  const isNetlifyOrExternal = 
-    hostname.endsWith('.netlify.app') || 
-    (!hostname.includes('run.app') && hostname !== 'localhost' && hostname !== '127.0.0.1');
-
-  if (isNetlifyOrExternal) {
-    // Point API to the hosted Google Cloud Run backend instance which handles /api requests
-    setBaseUrl('https://ais-pre-pfotbardce5vjnqnlmpm63-168977329553.asia-southeast1.run.app');
-  }
-} catch (e) {
-  console.warn('Could not determine dynamic base URL:', e);
-}
-
 const queryClient = new QueryClient();
 
 function Router() {

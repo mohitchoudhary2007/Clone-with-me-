@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   initializeFirestore,
+  memoryLocalCache,
   persistentLocalCache,
   persistentMultipleTabManager,
   getFirestore,
@@ -21,19 +22,27 @@ import firebaseConfig from './firebase-config.json';
 // Initialize Firebase
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Configure Firestore with auto-detect long-polling and multi-tab persistent cache
-// This prevents the 10-second WebSocket timeout when Firestore is run inside sandboxed iframes or custom preview environments.
+// Configure Firestore with auto-detect long-polling and fallback cache managers.
+// We use memoryLocalCache() primarily to avoid IndexedDB / third-party storage blocks inside cross-origin sandboxed iframes.
 let firestoreDb;
 try {
   firestoreDb = initializeFirestore(app, {
     experimentalAutoDetectLongPolling: true,
-    localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager(),
-    }),
+    localCache: memoryLocalCache(),
   });
 } catch (error) {
-  console.warn('initializeFirestore with advanced settings failed, falling back to getFirestore:', error);
-  firestoreDb = getFirestore(app);
+  console.warn('initializeFirestore with memory cache and auto-polling failed, trying persistent cache:', error);
+  try {
+    firestoreDb = initializeFirestore(app, {
+      experimentalAutoDetectLongPolling: true,
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+      }),
+    });
+  } catch (err2) {
+    console.warn('initializeFirestore with persistent cache failed, falling back to getFirestore:', err2);
+    firestoreDb = getFirestore(app);
+  }
 }
 
 export const db = firestoreDb;
