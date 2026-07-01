@@ -1,0 +1,22 @@
+{
+  "name": "workspace",
+  "version": "0.0.0",
+  "license": "MIT",
+  "workspaces": [
+    "artifacts/*",
+    "lib/*",
+    "scripts"
+  ],
+  "scripts": {
+    "dev": "npx --yes kill-port 3000 && npm run build --workspace=@workspace/website-cloner && npm run build --workspace=@workspace/api-server && npm run start --workspace=@workspace/api-server",
+    "build": "npm run build --workspace=@workspace/website-cloner && npm run build --workspace=@workspace/api-server"
+  },
+  "private": true,
+  "devDependencies": {
+    "prettier": "^3.8.4",
+    "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "firebase": "^12.15.0"
+  }
+}

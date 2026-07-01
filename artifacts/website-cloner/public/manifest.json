@@ -1,0 +1,17 @@
+{
+  "short_name": "Web Cloner",
+  "name": "TinyFish Website Clone Prompt Generator",
+  "description": "Generate perfect, optimized AI prompts to clone any website or landing page with end-to-end encrypted real-time admin support.",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "display": "standalone",
+  "orientation": "portrait"
+}

@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "Website Clone Prompt Generator"
+version = "1.0.0"
+id = "artifacts/website-cloner"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23212
+
+[services.development]
+run = "pnpm --filter @workspace/website-cloner run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/website-cloner", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/website-cloner/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23212"
+BASE_PATH = "/"
