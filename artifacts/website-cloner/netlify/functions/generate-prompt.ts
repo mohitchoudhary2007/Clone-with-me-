@@ -178,8 +178,114 @@ async function fetchPlain(url: URL): Promise<{ html: string; title: string; desc
   }
 }
 
+// ── Shared Core Processing Logic ──────────────────────────────────────────────
+async function handleGeneratePrompt(url: string) {
+  if (!url) {
+    return {
+      statusCode: 400,
+      body: { error: "Invalid request: url is required" }
+    };
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    return {
+      statusCode: 400,
+      body: { error: "Invalid URL format. Include http:// or https://" }
+    };
+  }
+
+  if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+    return {
+      statusCode: 400,
+      body: { error: "Only http and https URLs are supported" }
+    };
+  }
+
+  // SSRF protection
+  const safe = await isSafeUrl(parsedUrl);
+  if (!safe) {
+    return {
+      statusCode: 400,
+      body: { error: "URL must point to a publicly accessible website" }
+    };
+  }
+
+  const tinyfishKey = process.env.TINYFISH_API_KEY;
+
+  let title = "";
+  let description = "";
+  let html = "";
+
+  // Try TinyFish first (if configured), fall back to plain fetch
+  if (tinyfishKey) {
+    try {
+      console.log(`[Netlify Function] Fetching via TinyFish: ${url}`);
+      const result = await fetchWithTinyfish(url, tinyfishKey);
+      title = result.title;
+      description = result.description;
+      const MAX_TF = 2 * 1024 * 1024;
+      const raw = result.text || result.html;
+      html = raw.length > MAX_TF ? raw.slice(0, MAX_TF) : raw;
+      console.log(`[Netlify Function] TinyFish fetch OK. Content length: ${html.length}`);
+    } catch (err: any) {
+      console.warn(`[Netlify Function] TinyFish failed, falling back to plain fetch:`, err);
+    }
+  }
+
+  if (!html) {
+    try {
+      console.log(`[Netlify Function] Fetching via plain HTTP: ${url}`);
+      const result = await fetchPlain(parsedUrl);
+      title = result.title;
+      description = result.description;
+      html = result.html;
+      console.log(`[Netlify Function] Plain fetch OK. Content length: ${html.length}`);
+    } catch (err: any) {
+      console.error(`[Netlify Function] Plain fetch failed:`, err);
+      const msg = err?.name === "AbortError"
+        ? "Request timed out. The website took too long to respond."
+        : `Could not fetch the website: ${err?.message ?? "Unknown error"}. Make sure the URL is correct and publicly accessible.`;
+      
+      return {
+        statusCode: 400,
+        body: { error: msg }
+      };
+    }
+  }
+
+  if (!html.trim()) {
+    return {
+      statusCode: 400,
+      body: { error: "Could not extract any content from the website." }
+    };
+  }
+
+  // Generate clone prompt (local, no LLM required)
+  const prompt = generateClonePrompt(html, url, title, description);
+
+  if (!prompt) {
+    return {
+      statusCode: 500,
+      body: { error: "Failed to generate prompt. Please try again." }
+    };
+  }
+
+  return {
+    statusCode: 200,
+    body: {
+      prompt,
+      analyzedUrl: url,
+      title: title || parsedUrl.hostname,
+      description: description || null,
+    }
+  };
+}
+
+// ── Netlify V2 Default Handler ──────────────────────────────────────────────
 export default async (req: Request) => {
-  // Handle CORS Preflight
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
@@ -203,137 +309,17 @@ export default async (req: Request) => {
 
   try {
     const body = await req.json() as { url?: string };
-    const url = body?.url;
+    const result = await handleGeneratePrompt(body?.url || "");
 
-    if (!url) {
-      return new Response(JSON.stringify({ error: "Invalid request: url is required" }), {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-        },
-      });
-    }
-
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(url);
-    } catch {
-      return new Response(JSON.stringify({ error: "Invalid URL format. Include http:// or https://" }), {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-        },
-      });
-    }
-
-    if (!["http:", "https:"].includes(parsedUrl.protocol)) {
-      return new Response(JSON.stringify({ error: "Only http and https URLs are supported" }), {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-        },
-      });
-    }
-
-    // SSRF protection
-    const safe = await isSafeUrl(parsedUrl);
-    if (!safe) {
-      return new Response(JSON.stringify({ error: "URL must point to a publicly accessible website" }), {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-        },
-      });
-    }
-
-    const tinyfishKey = process.env.TINYFISH_API_KEY;
-
-    let title = "";
-    let description = "";
-    let html = "";
-
-    // Try TinyFish first (if configured), fall back to plain fetch
-    if (tinyfishKey) {
-      try {
-        console.log(`[Netlify Function] Fetching via TinyFish: ${url}`);
-        const result = await fetchWithTinyfish(url, tinyfishKey);
-        title = result.title;
-        description = result.description;
-        const MAX_TF = 2 * 1024 * 1024;
-        const raw = result.text || result.html;
-        html = raw.length > MAX_TF ? raw.slice(0, MAX_TF) : raw;
-        console.log(`[Netlify Function] TinyFish fetch OK. Content length: ${html.length}`);
-      } catch (err: any) {
-        console.warn(`[Netlify Function] TinyFish failed, falling back to plain fetch:`, err);
-      }
-    }
-
-    if (!html) {
-      try {
-        console.log(`[Netlify Function] Fetching via plain HTTP: ${url}`);
-        const result = await fetchPlain(parsedUrl);
-        title = result.title;
-        description = result.description;
-        html = result.html;
-        console.log(`[Netlify Function] Plain fetch OK. Content length: ${html.length}`);
-      } catch (err: any) {
-        console.error(`[Netlify Function] Plain fetch failed:`, err);
-        const msg = err?.name === "AbortError"
-          ? "Request timed out. The website took too long to respond."
-          : `Could not fetch the website: ${err?.message ?? "Unknown error"}. Make sure the URL is correct and publicly accessible.`;
-        
-        return new Response(JSON.stringify({ error: msg }), {
-          status: 400,
-          headers: {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-          },
-        });
-      }
-    }
-
-    if (!html.trim()) {
-      return new Response(JSON.stringify({ error: "Could not extract any content from the website." }), {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-        },
-      });
-    }
-
-    // Generate clone prompt (local, no LLM required)
-    const prompt = generateClonePrompt(html, url, title, description);
-
-    if (!prompt) {
-      return new Response(JSON.stringify({ error: "Failed to generate prompt. Please try again." }), {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-        },
-      });
-    }
-
-    return new Response(JSON.stringify({
-      prompt,
-      analyzedUrl: url,
-      title: title || parsedUrl.hostname,
-      description: description || null,
-    }), {
-      status: 200,
+    return new Response(JSON.stringify(result.body), {
+      status: result.statusCode,
       headers: {
         "Content-Type": "application/json",
         "Access-Control-Allow-Origin": "*",
       },
     });
-
   } catch (err: any) {
-    console.error("[Netlify Function] Unexpected internal error:", err);
+    console.error("[Netlify Function V2] Unexpected internal error:", err);
     return new Response(JSON.stringify({ error: `Internal server error: ${err.message}` }), {
       status: 500,
       headers: {
@@ -341,5 +327,49 @@ export default async (req: Request) => {
         "Access-Control-Allow-Origin": "*",
       },
     });
+  }
+};
+
+// ── Netlify V1 Handler (Universal Compatibility) ────────────────────────────
+export const handler = async (event: any) => {
+  const headers = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Content-Type": "application/json",
+  };
+
+  if (event.httpMethod === "OPTIONS") {
+    return {
+      statusCode: 204,
+      headers,
+      body: "",
+    };
+  }
+
+  if (event.httpMethod !== "POST") {
+    return {
+      statusCode: 405,
+      headers,
+      body: JSON.stringify({ error: "Method not allowed" }),
+    };
+  }
+
+  try {
+    const body = JSON.parse(event.body || "{}");
+    const result = await handleGeneratePrompt(body?.url || "");
+
+    return {
+      statusCode: result.statusCode,
+      headers,
+      body: JSON.stringify(result.body),
+    };
+  } catch (err: any) {
+    console.error("[Netlify Function V1] Unexpected internal error:", err);
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: `Internal server error: ${err.message}` }),
+    };
   }
 };

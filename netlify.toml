@@ -10,6 +10,10 @@
   # Publish directory: relative to the base directory (artifacts/website-cloner/dist)
   publish = "dist"
 
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
