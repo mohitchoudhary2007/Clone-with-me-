@@ -22,19 +22,19 @@ import firebaseConfig from './firebase-config.json';
 // Initialize Firebase
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Configure Firestore with auto-detect long-polling and fallback cache managers.
-// We use memoryLocalCache() primarily to avoid IndexedDB / third-party storage blocks inside cross-origin sandboxed iframes.
+// Configure Firestore with experimentalForceLongPolling and fallback cache managers.
+// This prevents connection hangs and websocket blockages in iframe / sandboxed preview environments.
 let firestoreDb;
 try {
   firestoreDb = initializeFirestore(app, {
-    experimentalAutoDetectLongPolling: true,
+    experimentalForceLongPolling: true,
     localCache: memoryLocalCache(),
   });
 } catch (error) {
-  console.warn('initializeFirestore with memory cache and auto-polling failed, trying persistent cache:', error);
+  console.warn('initializeFirestore with memory cache and force-polling failed, trying persistent cache:', error);
   try {
     firestoreDb = initializeFirestore(app, {
-      experimentalAutoDetectLongPolling: true,
+      experimentalForceLongPolling: true,
       localCache: persistentLocalCache({
         tabManager: persistentMultipleTabManager(),
       }),
